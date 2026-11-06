@@ -1,0 +1,21 @@
+FITUR MANAJEMEN PEGAWAI — FACETHEHTIC KASIR
+
+Perubahan:
+1. Bos dapat mengaktifkan / menonaktifkan akun.
+2. Bos dapat mengarsipkan dan memulihkan akun.
+3. Akun yang diarsipkan tidak dapat login.
+4. Bos dapat menghapus permanen akun hanya jika akun belum memiliki transaksi.
+5. Akun Bos dilindungi dari penghapusan/pengarsipan melalui menu ini.
+6. Riwayat transaksi tetap aman karena akun yang memiliki transaksi tidak bisa dihapus.
+
+PENERAPAN:
+- Backup database dan folder proyek terlebih dahulu.
+- Ganti folder proyek lama dengan isi ZIP ini (atau salin file yang berubah).
+- Jalankan ulang server: npm start (atau perintah start yang biasa digunakan).
+- Saat server mulai, ensureSchema otomatis menambahkan kolom users.archived_at jika belum ada.
+- Buka menu Bos > Pegawai & Akun.
+- Gunakan filter "Kelompok" untuk melihat Arsip.
+
+Catatan:
+- Jangan menjalankan schema.sql dari awal pada database aktif karena file tersebut berisi DROP TABLE.
+- Arsip hanya menandai akun; data pegawai dan transaksi tidak dihapus.

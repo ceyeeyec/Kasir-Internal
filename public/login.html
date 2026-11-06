@@ -9,57 +9,42 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 </head>
-<body class="login-page">
-<div class="login-shell">
-  <section class="login-brand-panel">
-    <div class="brand-copy">
-      <div class="login-mini-brand"><img src="/assets/facethethic-logo.png" alt="Logo FACETHEHTIC"><span>FACETHEHTIC</span></div>
-      <div class="login-kicker">KASIR INTERNAL · MULTI CABANG</div>
-      <h1>Satu sistem<br><em>untuk lima outlet.</em></h1>
-      <p>Stok, transaksi, pelanggan, kasbon, pegawai, dan laporan FACETHEHTIC dikelola dalam satu sistem dengan akses sesuai peran.</p>
-      <div class="login-feature-list">
-        <div><span>01</span><b>Stok terpusat</b><small>Pantau stok setiap cabang.</small></div>
-        <div><span>02</span><b>Transaksi cepat</b><small>Kasir dan transaksi manual.</small></div>
-        <div><span>03</span><b>Laporan rapi</b><small>Data tersimpan langsung ke database.</small></div>
+<body class="login-page login-single-page">
+  <main class="login-single-wrap">
+    <section class="login-single-card" aria-label="Form login FACETHEHTIC">
+      <div class="login-logo-wrap">
+        <img class="login-logo" src="/assets/facethethic-logo.png" alt="Logo FACETHEHTIC">
       </div>
-    </div>
-    <div class="login-brand-footer"><span>FACETHEHTIC</span><span>Beauty &amp; Aesthetic Center</span></div>
-    <div class="login-orbit orbit-a"></div><div class="login-orbit orbit-b"></div>
-  </section>
 
-  <section class="login-panel">
-    <div class="login-card">
-      <div class="login-logo-wrap"><img class="login-logo" src="/assets/facethethic-logo.png" alt="FACETHEHTIC"></div>
-      <h2>Selamat datang kembali</h2>
-      <p class="login-sub">Masuk ke dashboard FACETHEHTIC</p>
+      <h1>Selamat datang kembali</h1>
+      <p class="login-single-sub">Masuk ke dashboard FACETHEHTIC</p>
 
       <form id="loginForm" novalidate>
         <div class="field-block">
           <label for="username">ID pegawai</label>
-          <div class="input-shell"><span class="input-icon">ID</span><input id="username" autocomplete="username" placeholder="Masukkan ID pegawai" required></div>
+          <div class="input-shell">
+            <span class="input-icon">ID</span>
+            <input id="username" name="username" type="text" autocomplete="username" placeholder="Masukkan ID pegawai" required autofocus>
+          </div>
         </div>
-        <div class="field-block">
+
+        <div class="field-block password-field">
           <label for="password">Kata sandi</label>
-          <div class="input-shell"><span class="input-icon">••</span><input id="password" type="password" autocomplete="current-password" placeholder="Masukkan kata sandi" required><button type="button" class="password-toggle" id="showPass" aria-label="Tampilkan kata sandi">Lihat</button></div>
+          <div class="input-shell">
+            <span class="input-icon">••</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Masukkan kata sandi" required>
+            <button type="button" class="password-toggle" id="showPass" aria-label="Tampilkan kata sandi">Lihat</button>
+          </div>
         </div>
 
-        <div class="role-heading"><span>Masuk sebagai</span><small>Pilih sesuai akun</small></div>
-        <div class="role-options">
-          <button type="button" class="role-option active" data-role="bos"><span class="role-icon">B</span><span class="role-text"><b>Bos</b><small>Pemilik · seluruh cabang &amp; akun</small></span><span class="role-check">✓</span></button>
-          <button type="button" class="role-option" data-role="admin_pusat"><span class="role-icon">P</span><span class="role-text"><b>Admin Pusat</b><small>Operasional pusat · semua cabang</small></span><span class="role-check">✓</span></button>
-          <button type="button" class="role-option" data-role="admin_cabang"><span class="role-icon">C</span><span class="role-text"><b>Admin Cabang</b><small>Pengelola operasional satu cabang</small></span><span class="role-check">✓</span></button>
-          <button type="button" class="role-option" data-role="pegawai"><span class="role-icon">K</span><span class="role-text"><b>Pegawai</b><small>Kasir · transaksi harian</small></span><span class="role-check">✓</span></button>
-        </div>
+        <div id="error" class="login-error" role="alert" aria-live="polite"></div>
 
-        <div id="error" class="login-error" role="alert"></div>
-        <button type="submit" class="login-submit" id="loginButton"><span>Masuk ke sistem</span><span>→</span></button>
+        <button type="submit" class="login-submit" id="loginButton">
+          <span>Masuk</span><span aria-hidden="true">→</span>
+        </button>
       </form>
-
-      <div class="login-demo"><span>Akun demo</span><b>bos</b><span>·</span><b>password</b></div>
-      <p class="login-note">Akun dan batas akses mengikuti data pengguna yang tersimpan di database.</p>
-    </div>
-  </section>
-</div>
+    </section>
+  </main>
 <script src="/js/login.js"></script>
 </body>
 </html>

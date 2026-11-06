@@ -1,50 +1,26 @@
-FACETHEHTIC KASIR PORTAL — ROLE & PERMISSION FINAL
+FACETHEHTIC KASIR PORTAL - PROFESSIONAL FINAL
 
-INSTALL
 1. Extract directly to D:\FACETHEHTIC_KASIR_PORTAL
 2. Ensure MySQL/XAMPP is running.
-3. Fresh database: import database/schema.sql in phpMyAdmin.
-4. Existing database: npm install, then npm run seed-demo.
-5. npm start
-6. Open http://localhost:3000
+3. For a fresh database, import database/schema.sql in phpMyAdmin.
+4. For an existing database, run npm install then npm run seed-demo if needed.
+5. Run npm install
+6. Run npm start
+7. Open http://localhost:3000
 
-DEMO LOGIN
+DEMO ACCOUNTS
 bos / password
 adminpusat / password
 admincabang1 / password
 pegawai1 / password
 
-ROLE PERMISSIONS
-BOS
-- Read-only for business data: dashboard, products, stock, transactions/history, kasbon, customers, branches, reports, settings.
-- Customer: Detail + Cetak only.
-- Kasbon: Detail + Cetak/WhatsApp only; NO payment button.
-- No transaction menu.
-- Employee: ADD and EDIT only (including password/status/role/branch). No employee deletion endpoint.
+ROLE NOTES
+- Bos: view-only for business data, may edit existing branch information, and may add/edit employee accounts. No business transaction menu.
+- Admin Pusat: operational management across all branches, including product master and stock adjustments for every branch.
+- Admin Cabang: operational management limited to its own branch; stock edits are restricted server-side to its branch.
+- Pegawai: cashier-focused access.
 
-ADMIN PUSAT
-- Can create/edit/deactivate master products, brands, categories.
-- Can adjust stock for ALL branches.
-- Can create/edit/delete transactions for ALL branches.
-- Can create/edit/delete customers across branches.
-- Can add/edit branches.
-- Can record kasbon payments across branches.
-- Can edit system settings.
-- Cannot manage employee accounts.
-
-ADMIN CABANG
-- Data changes are limited to own branch.
-- Can adjust own branch stock.
-- Can create/edit/delete own-branch transactions.
-- Can create/edit/delete own-branch customers.
-- Can record payments for own-branch kasbon.
-- Product master remains read-only; master product/brand/category is controlled centrally.
-- Employee page is view-only.
-
-PEGAWAI
-- Cashier-focused access for own branch.
-- Can create transactions and manage customer data according to branch scope.
-- Product and stock are view-only.
-
-SECURITY
-The server enforces these permissions in the API, not only in the UI. Direct API calls are also checked by role and branch. This prevents a user from bypassing hidden buttons by manually calling an endpoint.
+SETTINGS
+- Bos can edit store identity, logo, language, theme, and the Bos profile.
+- Employee photos and Bos profile photos accept PNG/JPG/WEBP up to 1 MB and are stored in MySQL.
+- Logo is stored as a database setting and displayed throughout the portal.

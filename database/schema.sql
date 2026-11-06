@@ -12,7 +12,7 @@ CREATE TABLE branches (
 CREATE TABLE users (
  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, username VARCHAR(50) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL,
  full_name VARCHAR(120) NOT NULL, role ENUM('bos','admin_pusat','admin_cabang','pegawai') NOT NULL, branch_id INT UNSIGNED NULL,
- status ENUM('aktif','nonaktif') NOT NULL DEFAULT 'aktif', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ photo LONGTEXT NULL, status ENUM('aktif','nonaktif') NOT NULL DEFAULT 'aktif', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  CONSTRAINT fk_users_branch FOREIGN KEY(branch_id) REFERENCES branches(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 CREATE TABLE brands (
@@ -91,7 +91,7 @@ INSERT INTO stock_histories(branch_id,product_id,user_id,type,quantity,before_st
 INSERT INTO activity_logs(user_id,action,description,created_at) VALUES
 (1,'LOGIN','Login ke sistem','2026-09-18 08:15:00'),(2,'CREATE_PRODUCT','Menambah produk baru','2026-09-18 09:15:00'),(3,'ADJUST_STOCK','Penyesuaian stok Cabang 1','2026-09-18 10:15:00'),(4,'CREATE_TRANSACTION','Membuat transaksi kasir','2026-09-18 11:15:00'),(7,'CREATE_TRANSACTION','Membuat transaksi cabang','2026-09-18 12:15:00'),(6,'PAY_KASBON','Mencatat pembayaran kasbon','2026-09-18 13:15:00'),(10,'CREATE_CUSTOMER','Menambah pelanggan','2026-09-18 14:15:00'),(1,'UPDATE_SETTINGS','Memperbarui pengaturan toko','2026-09-18 15:15:00'),(9,'CREATE_TRANSACTION','Membuat transaksi Cabang 3','2026-09-18 16:15:00'),(12,'CREATE_TRANSACTION','Membuat transaksi Cabang 4','2026-09-18 17:15:00');
 INSERT INTO settings(setting_key,setting_value) VALUES
-('store_name','FACETHEHTIC'),('store_tagline','KASIR INTERNAL'),('low_stock_threshold','50'),('language','id'),('theme','light'),('receipt_footer','Terima kasih telah berbelanja di FACETHEHTIC'),('receipt_address','Jl. Gatot Subroto No. 88, Medan'),('receipt_phone','08123456001');
+('store_name','FACETHEHTIC'),('store_tagline','KASIR INTERNAL'),('low_stock_threshold','50'),('language','id'),('theme','light'),('receipt_footer','Terima kasih telah berbelanja di FACETHEHTIC'),('receipt_address','Jl. Gatot Subroto No. 88, Medan'),('receipt_phone','08123456001'),('logo_url','');
 
 -- =============================
 -- DATA DEMO TAMBAHAN (BANYAK)

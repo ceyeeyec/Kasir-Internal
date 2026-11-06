@@ -38,20 +38,6 @@ function allowedBranch(user, branchId) {
   return Number(user.branch_id) === Number(branchId);
 }
 
-function canEditMaster(user) { return user?.role === 'admin_pusat'; }
-function canEditBranchData(user, branchId) {
-  if (!user) return false;
-  if (user.role === 'admin_pusat') return true;
-  if (user.role === 'admin_cabang') return Number(user.branch_id) === Number(branchId);
-  return false;
-}
-function canCreateTransaction(user, branchId) {
-  if (!user) return false;
-  if (['admin_pusat'].includes(user.role)) return true;
-  if (['admin_cabang','pegawai'].includes(user.role)) return Number(user.branch_id) === Number(branchId);
-  return false;
-}
-
 async function ensureSchema(){
   const q = async (sql) => { try { await db.query(sql); } catch(e) { console.warn('Schema migration:', e.message); } };
   await q("ALTER TABLE products ADD COLUMN favorite TINYINT(1) NOT NULL DEFAULT 0");
@@ -64,6 +50,9 @@ async function ensureSchema(){
   await q("ALTER TABLE customers ADD COLUMN notes TEXT NULL");
   await q("ALTER TABLE customers ADD COLUMN photo VARCHAR(255) DEFAULT ''");
   await q("ALTER TABLE customers ADD COLUMN branch_id INT UNSIGNED NULL");
+  await q("ALTER TABLE users ADD COLUMN photo LONGTEXT NULL");
+  await q("ALTER TABLE users ADD COLUMN archived_at DATETIME NULL");
+  await q("ALTER TABLE users MODIFY photo LONGTEXT NULL");
   await q("ALTER TABLE transactions MODIFY payment_method ENUM('tunai','transfer','qris','kasbon') NOT NULL DEFAULT 'tunai'");
   await q("ALTER TABLE transactions ADD COLUMN payment_method ENUM('tunai','transfer','qris','kasbon') NOT NULL DEFAULT 'tunai' AFTER customer_id");
   await q("ALTER TABLE transactions MODIFY payment_method ENUM('tunai','transfer','qris','kasbon') NOT NULL DEFAULT 'tunai'");
@@ -115,6 +104,7 @@ async function init() {
                 u.full_name,
                 u.role,
                 u.branch_id,
+                u.photo,
                 u.status,
                 b.name AS branch_name
             FROM users u
@@ -184,6 +174,28 @@ async function init() {
     return ok(h,{user:me(r)});
   }});
 
+  server.route({method:'PUT',path:'/api/me',handler:async(r,h)=>{
+    const a=requireLogin(r,h); if(a)return a;
+    const u=me(r);
+    const p=r.payload||{};
+    const fullName=String(p.full_name??u.full_name).trim();
+    const username=String(p.username??u.username).trim();
+    if(!fullName||!username) return fail(h,400,'Nama dan username wajib diisi.');
+    const photo = p.photo===undefined ? (u.photo||'') : String(p.photo||'');
+    if(photo && photo.length>1500000) return fail(h,400,'Ukuran foto terlalu besar. Gunakan foto maksimal sekitar 1 MB.');
+    try{
+      await db.query('UPDATE users SET username=?,full_name=?,photo=? WHERE id=?',[username,fullName,photo,u.id]);
+      const [rows]=await db.query(`SELECT u.id,u.username,u.full_name,u.role,u.branch_id,u.photo,u.status,u.archived_at,b.name branch_name FROM users u LEFT JOIN branches b ON b.id=u.branch_id WHERE u.id=? LIMIT 1`,[u.id]);
+      const updated=rows[0];
+      r.cookieAuth.set({id:u.id});
+      await log(u.id,'UPDATE_PROFILE','Memperbarui profil akun sendiri');
+      return ok(h,{user:updated});
+    }catch(e){
+      if(e.code==='ER_DUP_ENTRY') return fail(h,409,'Username sudah digunakan.');
+      throw e;
+    }
+  }});
+
   server.route({method:'GET',path:'/api/dashboard',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
     const u=me(r); const branchId=branchScope(u,r.query.branch_id);
@@ -233,21 +245,11 @@ async function init() {
   }});
   server.route({method:'POST',path:'/api/branches',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
-    if(me(r).role!=='admin_pusat') return fail(h,403,'Hanya Admin Pusat yang dapat menambah cabang.');
-    const p=r.payload||{};
-    if(!p.code||!p.name)return fail(h,400,'Kode dan nama cabang wajib diisi.');
-    const [x]=await db.query(
-      'INSERT INTO branches(code,name,address,phone,status) VALUES(?,?,?,?,?)',
-      [p.code,p.name,p.address||'',p.phone||'',p.status||'aktif']
-    );
-    const [prods]=await db.query('SELECT id FROM products WHERE status=\'aktif\'');
-    for(const pr of prods) await db.query('INSERT IGNORE INTO branch_stocks(branch_id,product_id,stock) VALUES(?,?,0)',[x.insertId,pr.id]);
-    return ok(h,{id:x.insertId});
+    return fail(h,403,'Penambahan cabang tidak tersedia.');
   }});
   server.route({method:'PUT',path:'/api/branches/{id}',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
-    if(!['admin_pusat','admin_cabang'].includes(me(r).role)) return fail(h,403,'Anda tidak memiliki hak mengubah cabang.');
-    if(me(r).role==='admin_cabang' && Number(r.params.id)!==Number(me(r).branch_id)) return fail(h,403,'Anda hanya dapat mengubah cabang sendiri.');
+    if(me(r).role!=='bos') return fail(h,403,'Hanya Bos yang dapat mengelola cabang.');
     const p=r.payload||{};
     await db.query(
       'UPDATE branches SET code=?,name=?,address=?,phone=?,status=? WHERE id=?',
@@ -271,12 +273,12 @@ async function init() {
   }});
   server.route({method:'POST',path:'/api/brands',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
-    if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengubah master produk.');
+    if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     const [x]=await db.query('INSERT INTO brands(name) VALUES(?)',[r.payload?.name]);
     return ok(h,{id:x.insertId});
   }});
   server.route({method:'PUT',path:'/api/brands/{id}',handler:async(r,h)=>{
-    const a=requireLogin(r,h);if(a)return a;if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengubah master produk.');
+    const a=requireLogin(r,h);if(a)return a;if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     const name=String(r.payload?.name||'').trim(); if(!name)return fail(h,400,'Nama merek wajib diisi.'); await db.query('UPDATE brands SET name=?,status=? WHERE id=?',[name,r.payload?.status||'aktif',r.params.id]); return ok(h);
   }});
 
@@ -284,11 +286,11 @@ async function init() {
     const a=requireLogin(r,h);if(a)return a; const [rows]=await db.query('SELECT * FROM categories ORDER BY name'); return ok(h,{categories:rows});
   }});
   server.route({method:'POST',path:'/api/categories',handler:async(r,h)=>{
-    const a=requireLogin(r,h);if(a)return a; if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengubah master produk.');
+    const a=requireLogin(r,h);if(a)return a; if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     const name=String(r.payload?.name||'').trim(); if(!name)return fail(h,400,'Nama kategori wajib diisi.'); const [x]=await db.query('INSERT INTO categories(name) VALUES(?)',[name]); return ok(h,{id:x.insertId});
   }});
   server.route({method:'PUT',path:'/api/categories/{id}',handler:async(r,h)=>{
-    const a=requireLogin(r,h);if(a)return a;if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengubah master produk.');
+    const a=requireLogin(r,h);if(a)return a;if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     const name=String(r.payload?.name||'').trim(); if(!name)return fail(h,400,'Nama kategori wajib diisi.'); await db.query('UPDATE categories SET name=?,status=? WHERE id=?',[name,r.payload?.status||'aktif',r.params.id]); return ok(h);
   }});
 
@@ -307,7 +309,7 @@ async function init() {
   }});
   server.route({method:'POST',path:'/api/products',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
-    if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengelola produk.');
+    if(!canManageMaster(me(r)))return fail(h,403,'Hanya Bos/Admin Pusat yang dapat mengelola produk.');
     const p=r.payload||{};
     if(!p.sku||!p.name)return fail(h,400,'SKU dan nama produk wajib diisi.');
     const [x]=await db.query(`
@@ -323,7 +325,7 @@ async function init() {
   }});
   server.route({method:'PUT',path:'/api/products/{id}',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
-    if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengelola produk.');
+    if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     const p=r.payload||{};
     await db.query(`
       UPDATE products SET sku=?,name=?,barcode=?,brand_id=?,category=?,unit=?,purchase_price=?,selling_price=?,min_stock=?,online_stock=?,status=?
@@ -334,11 +336,11 @@ async function init() {
   }});
 
   server.route({method:'PUT',path:'/api/products/{id}/favorite',handler:async(r,h)=>{
-    const a=requireLogin(r,h);if(a)return a; if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengubah favorit produk.');
+    const a=requireLogin(r,h);if(a)return a; if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     await db.query('UPDATE products SET favorite=? WHERE id=?',[r.payload?.favorite?1:0,r.params.id]); return ok(h);
   }});
   server.route({method:'DELETE',path:'/api/products/{id}',handler:async(r,h)=>{
-    const a=requireLogin(r,h);if(a)return a;if(!canEditMaster(me(r)))return fail(h,403,'Hanya Admin Pusat yang dapat mengelola produk.');
+    const a=requireLogin(r,h);if(a)return a;if(!canManageMaster(me(r)))return fail(h,403,'Akses ditolak.');
     await db.query("UPDATE products SET status='nonaktif' WHERE id=?",[r.params.id]); await log(me(r).id,'DEACTIVATE_PRODUCT',`Menonaktifkan produk ${r.params.id}`); return ok(h);
   }});
 
@@ -357,13 +359,16 @@ async function init() {
   server.route({method:'POST',path:'/api/stock/adjust',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
     const u=me(r);
-    if(!['admin_pusat','admin_cabang'].includes(u.role))return fail(h,403,'Akses pengaturan stok ditolak.');
+    if(!['bos','admin_pusat','admin_cabang'].includes(u.role))return fail(h,403,'Akses pengaturan stok ditolak.');
     const raw=r.payload||{};
     const branch_id=isCentral(u)?Number(raw.branch_id):Number(u.branch_id);
     const {product_id,quantity,type}=raw;
     const qty=Number(quantity);
+    const note=String(raw.note||'').trim();
     if(!branch_id||!product_id||qty<0||!['in','out','adjust'].includes(type))
       return fail(h,400,'Data stok tidak valid.');
+    if(!note) return fail(h,400,'Keterangan wajib diisi untuk keperluan audit.');
+    if(note.length>255) return fail(h,400,'Keterangan maksimal 255 karakter.');
     const conn=await db.getConnection();
     try{
       await conn.beginTransaction();
@@ -384,7 +389,7 @@ async function init() {
       if(res.affectedRows!==1)throw new Error('Stok tidak mencukupi.');
       const [afterRows]=await conn.query('SELECT stock FROM branch_stocks WHERE branch_id=? AND product_id=?',[branch_id,product_id]);
       const before=check[0]?Number(check[0].stock):0; const after=Number(afterRows[0]?.stock||0);
-      await conn.query('INSERT INTO stock_histories(branch_id,product_id,user_id,type,quantity,before_stock,after_stock,note) VALUES(?,?,?,?,?,?,?,?)',[branch_id,product_id,u.id,type,type==='adjust'?Math.abs(after-before):qty,before,after,String(raw.note||'')]);
+      await conn.query('INSERT INTO stock_histories(branch_id,product_id,user_id,type,quantity,before_stock,after_stock,note) VALUES(?,?,?,?,?,?,?,?)',[branch_id,product_id,u.id,type,type==='adjust'?Math.abs(after-before):qty,before,after,note]);
       await conn.commit();
       await log(u.id,'ADJUST_STOCK',`${type==='in'?'Menambah':'Mengurangi'} ${qty} stok`);
       return ok(h);
@@ -408,7 +413,6 @@ async function init() {
   }});
   server.route({method:'POST',path:'/api/customers',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a; const u=me(r),p=r.payload||{};
-    if(!['admin_pusat','admin_cabang','pegawai'].includes(u.role))return fail(h,403,'Bos hanya dapat melihat data pelanggan.');
     if(!p.name)return fail(h,400,'Nama pelanggan wajib diisi.');
     const branchId=isCentral(u)?(p.branch_id?Number(p.branch_id):null):Number(u.branch_id);
     const [x]=await db.query(`INSERT INTO customers(name,phone,email,ktp,gender,birthdate,address,notes,photo,branch_id) VALUES(?,?,?,?,?,?,?,?,?,?)`,
@@ -417,7 +421,6 @@ async function init() {
   }});
   server.route({method:'PUT',path:'/api/customers/{id}',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a; const u=me(r),p=r.payload||{};
-    if(!['admin_pusat','admin_cabang','pegawai'].includes(u.role))return fail(h,403,'Bos hanya dapat melihat data pelanggan.');
     const [rows]=await db.query('SELECT * FROM customers WHERE id=?',[r.params.id]); if(!rows[0])return fail(h,404,'Pelanggan tidak ditemukan.');
     if(!isCentral(u)&&rows[0].branch_id && Number(rows[0].branch_id)!==Number(u.branch_id))return fail(h,403,'Pelanggan bukan milik cabang Anda.');
     await db.query(`UPDATE customers SET name=?,phone=?,email=?,ktp=?,gender=?,birthdate=?,address=?,notes=?,photo=? WHERE id=?`,
@@ -432,7 +435,6 @@ async function init() {
 
   server.route({method:'DELETE',path:'/api/customers/{id}',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a; const u=me(r);
-    if(!['admin_pusat','admin_cabang','pegawai'].includes(u.role))return fail(h,403,'Bos hanya dapat melihat data pelanggan.');
     const [rows]=await db.query('SELECT * FROM customers WHERE id=?',[r.params.id]); if(!rows[0])return fail(h,404,'Pelanggan tidak ditemukan.');
     if(!isCentral(u) && rows[0].branch_id && Number(rows[0].branch_id)!==Number(u.branch_id)) return fail(h,403,'Akses ditolak.');
     const [[used]]=await db.query('SELECT COUNT(*) count FROM transactions WHERE customer_id=?',[r.params.id]);
@@ -444,7 +446,7 @@ async function init() {
     const a=requireLogin(r,h);if(a)return a;
     const u=me(r);
     if(!['bos','admin_cabang'].includes(u.role))return fail(h,403,'Akses pegawai ditolak.');
-    let sql=`SELECT u.id,u.username,u.full_name,u.role,u.branch_id,u.status,b.name branch_name
+    let sql=`SELECT u.id,u.username,u.full_name,u.role,u.branch_id,u.photo,u.status,u.archived_at,b.name branch_name
              FROM users u LEFT JOIN branches b ON b.id=u.branch_id`;
     const args=[];
     if(!isCentral(u)){sql+=' WHERE u.branch_id=?';args.push(u.branch_id);}
@@ -458,6 +460,8 @@ async function init() {
     if(actor.role!=='bos')return fail(h,403,'Hanya Bos yang dapat membuat akun pegawai.');
     const p=r.payload||{};
     if(!p.username||!p.password||!p.full_name||!p.role)return fail(h,400,'Data akun belum lengkap.');
+    const photo=String(p.photo||'');
+    if(photo.length>1500000)return fail(h,400,'Ukuran foto terlalu besar.');
     if(!['admin_pusat','admin_cabang','pegawai'].includes(p.role))return fail(h,400,'Role akun yang dapat dibuat: Admin Pusat, Admin Cabang, atau Pegawai.');
     if(!isCentral(actor) && p.role!=='pegawai' && p.role!=='admin_cabang')
       return fail(h,403,'Admin Cabang hanya dapat membuat akun cabangnya.');
@@ -465,8 +469,8 @@ async function init() {
     if(['admin_cabang','pegawai'].includes(p.role) && !branchId)return fail(h,400,'Cabang wajib dipilih.');
     const hash=await bcrypt.hash(p.password,10);
     const [x]=await db.query(
-      'INSERT INTO users(username,password_hash,full_name,role,branch_id,status) VALUES(?,?,?,?,?,?)',
-      [p.username,hash,p.full_name,p.role,branchId,p.status||'aktif']
+      'INSERT INTO users(username,password_hash,full_name,role,branch_id,photo,status) VALUES(?,?,?,?,?,?,?)',
+      [p.username,hash,p.full_name,p.role,branchId,photo,p.status||'aktif']
     );
     await log(actor.id,'CREATE_USER',`Membuat akun ${p.username}`);
     return ok(h,{id:x.insertId});
@@ -480,18 +484,53 @@ async function init() {
     if(!target)return fail(h,404,'Akun tidak ditemukan.');
     if(!isCentral(actor)&&target.branch_id!==actor.branch_id)return fail(h,403,'Akun bukan milik cabang Anda.');
     const branchId=isCentral(actor)?(p.branch_id??target.branch_id):actor.branch_id;
+    const photo=p.photo===undefined?(target.photo||''):String(p.photo||'');
+    if(photo.length>1500000)return fail(h,400,'Ukuran foto terlalu besar.');
     if(p.password){
       const hash=await bcrypt.hash(p.password,10);
       await db.query(
-        'UPDATE users SET username=?,full_name=?,role=?,branch_id=?,status=?,password_hash=? WHERE id=?',
-        [p.username,p.full_name,p.role,branchId,p.status||'aktif',hash,r.params.id]
+        'UPDATE users SET username=?,full_name=?,role=?,branch_id=?,photo=?,status=?,password_hash=? WHERE id=?',
+        [p.username,p.full_name,p.role,branchId,photo,p.status||'aktif',hash,r.params.id]
       );
     }else{
       await db.query(
-        'UPDATE users SET username=?,full_name=?,role=?,branch_id=?,status=? WHERE id=?',
-        [p.username,p.full_name,p.role,branchId,p.status||'aktif',r.params.id]
+        'UPDATE users SET username=?,full_name=?,role=?,branch_id=?,photo=?,status=? WHERE id=?',
+        [p.username,p.full_name,p.role,branchId,photo,p.status||'aktif',r.params.id]
       );
     }
+    return ok(h);
+  }});
+
+  server.route({method:'POST',path:'/api/users/{id}/archive',handler:async(r,h)=>{
+    const a=requireLogin(r,h);if(a)return a;
+    const actor=me(r);
+    if(actor.role!=='bos')return fail(h,403,'Hanya Bos yang dapat mengarsipkan akun.');
+    const id=Number(r.params.id);
+    if(id===Number(actor.id))return fail(h,400,'Akun Bos yang sedang digunakan tidak dapat diarsipkan.');
+    const [rows]=await db.query('SELECT id,username,role,archived_at FROM users WHERE id=?',[id]);
+    const target=rows[0];
+    if(!target)return fail(h,404,'Akun tidak ditemukan.');
+    if(target.role==='bos')return fail(h,403,'Akun Bos tidak dapat diarsipkan dari menu ini.');
+    const archived=Boolean(r.payload?.archived);
+    await db.query('UPDATE users SET archived_at=? WHERE id=?',[archived?new Date():null,id]);
+    await log(actor.id,archived?'ARCHIVE_USER':'RESTORE_USER',`${archived?'Mengarsipkan':'Memulihkan'} akun ${target.username}`);
+    return ok(h);
+  }});
+
+  server.route({method:'DELETE',path:'/api/users/{id}',handler:async(r,h)=>{
+    const a=requireLogin(r,h);if(a)return a;
+    const actor=me(r);
+    if(actor.role!=='bos')return fail(h,403,'Hanya Bos yang dapat menghapus akun.');
+    const id=Number(r.params.id);
+    if(id===Number(actor.id))return fail(h,400,'Akun yang sedang digunakan tidak dapat dihapus.');
+    const [rows]=await db.query('SELECT id,username,role FROM users WHERE id=?',[id]);
+    const target=rows[0];
+    if(!target)return fail(h,404,'Akun tidak ditemukan.');
+    if(target.role==='bos')return fail(h,403,'Akun Bos tidak dapat dihapus dari menu ini.');
+    const [[usage]]=await db.query('SELECT COUNT(*) AS total FROM transactions WHERE user_id=?',[id]);
+    if(Number(usage.total)>0)return fail(h,409,'Akun memiliki riwayat transaksi. Arsipkan akun agar riwayat tetap aman.');
+    await db.query('DELETE FROM users WHERE id=?',[id]);
+    await log(actor.id,'DELETE_USER',`Menghapus akun ${target.username}`);
     return ok(h);
   }});
 
@@ -501,7 +540,6 @@ async function init() {
     const branchId=isCentral(u)?Number(p.branch_id||u.branch_id):Number(u.branch_id);
     const paymentMethod=['tunai','transfer','qris','kasbon'].includes(p.payment_method)?p.payment_method:'tunai';
     if(!branchId)return fail(h,400,'Cabang transaksi wajib dipilih.');
-    if(!canCreateTransaction(u,branchId))return fail(h,403,'Anda tidak memiliki hak membuat transaksi.');
     if(!Array.isArray(p.items)||!p.items.length)return fail(h,400,'Keranjang masih kosong.');
     if(!allowedBranch(u,branchId))return fail(h,403,'Anda tidak dapat bertransaksi di cabang ini.');
 
@@ -565,7 +603,7 @@ async function init() {
     const paymentMethod=['tunai','transfer','qris','kasbon'].includes(p.payment_method)?p.payment_method:'tunai';
     const amount=Number(p.amount||0);
     if(!branchId)return fail(h,400,'Cabang transaksi wajib dipilih.');
-    if(!canCreateTransaction(u,branchId))return fail(h,403,'Anda tidak memiliki hak membuat transaksi.');
+    if(!allowedBranch(u,branchId))return fail(h,403,'Anda tidak dapat bertransaksi di cabang ini.');
     if(amount<=0)return fail(h,400,'Nominal harus lebih dari 0.');
     if(!String(p.description||'').trim())return fail(h,400,'Deskripsi wajib diisi.');
     const paid=Math.max(0,Number(p.paid||0));
@@ -596,7 +634,7 @@ async function init() {
   server.route({method:'PUT',path:'/api/transactions/{id}',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
     const u=me(r);
-    if(!['admin_pusat','admin_cabang'].includes(u.role))return fail(h,403,'Anda tidak memiliki hak mengedit transaksi.');
+    if(u.role!=='bos')return fail(h,403,'Hanya Bos yang dapat mengedit transaksi dari Riwayat.');
     const p=r.payload||{};
     const id=Number(r.params.id);
     const conn=await db.getConnection();
@@ -605,11 +643,9 @@ async function init() {
       const [txRows]=await conn.query('SELECT * FROM transactions WHERE id=? FOR UPDATE',[id]);
       const old=txRows[0];
       if(!old)throw new Error('Transaksi tidak ditemukan.');
-      if(!canEditBranchData(u,old.branch_id))throw new Error('Transaksi bukan milik cabang Anda.');
       if(old.status==='batal')throw new Error('Transaksi yang sudah dibatalkan tidak dapat diedit.');
       const paymentMethod=['tunai','transfer','qris','kasbon'].includes(p.payment_method)?p.payment_method:old.payment_method;
       const branchId=Number(p.branch_id||old.branch_id);
-      if(!canEditBranchData(u,branchId))throw new Error('Anda tidak dapat memindahkan transaksi ke cabang lain.');
       const customerId=p.customer_id?Number(p.customer_id):null;
       const description=String(p.description??old.description??'');
       const dueDate=p.due_date||null;
@@ -669,13 +705,12 @@ async function init() {
   server.route({method:'DELETE',path:'/api/transactions/{id}',handler:async(r,h)=>{
     const a=requireLogin(r,h);if(a)return a;
     const u=me(r);
-    if(!['admin_pusat','admin_cabang'].includes(u.role))return fail(h,403,'Anda tidak memiliki hak menghapus transaksi.');
+    if(u.role!=='bos')return fail(h,403,'Hanya Bos yang dapat menghapus transaksi dari Riwayat.');
     const id=Number(r.params.id),conn=await db.getConnection();
     try{
       await conn.beginTransaction();
       const [rows]=await conn.query('SELECT * FROM transactions WHERE id=? FOR UPDATE',[id]); const t=rows[0];
       if(!t)throw new Error('Transaksi tidak ditemukan.');
-      if(!canEditBranchData(u,t.branch_id))throw new Error('Transaksi bukan milik cabang Anda.');
       const [items]=await conn.query('SELECT * FROM transaction_items WHERE transaction_id=? FOR UPDATE',[id]);
       for(const item of items) await conn.query('UPDATE branch_stocks SET stock=stock+? WHERE branch_id=? AND product_id=?',[item.quantity,t.branch_id,item.product_id]);
       await conn.query('DELETE FROM kasbon_payments WHERE transaction_id=?',[id]);
@@ -708,7 +743,7 @@ async function init() {
     if(!isCentral(u)){sql+=' AND t.branch_id=?';args.push(u.branch_id);} if(r.query.status==='lunas')sql+=' HAVING (t.paid+paid_after)>=t.total'; else if(r.query.status==='belum')sql+=' HAVING (t.paid+paid_after)<t.total'; sql+=' ORDER BY t.id DESC LIMIT 300'; const [rows]=await db.query(sql,args); return ok(h,{kasbon:rows});
   }});
   server.route({method:'POST',path:'/api/kasbon/{id}/payment',handler:async(r,h)=>{
-    const a=requireLogin(r,h);if(a)return a; const u=me(r),amount=Number(r.payload?.amount||0); if(!['admin_pusat','admin_cabang','pegawai'].includes(u.role))return fail(h,403,'Bos hanya dapat melihat kasbon.'); if(amount<=0)return fail(h,400,'Nominal pembayaran tidak valid.');
+    const a=requireLogin(r,h);if(a)return a; const u=me(r),amount=Number(r.payload?.amount||0); if(amount<=0)return fail(h,400,'Nominal pembayaran tidak valid.');
     const [rows]=await db.query(`SELECT t.*,COALESCE((SELECT SUM(amount) FROM kasbon_payments WHERE transaction_id=t.id),0) paid_after FROM transactions t WHERE t.id=? AND t.payment_method='kasbon'`,[r.params.id]); const t=rows[0]; if(!t)return fail(h,404,'Kasbon tidak ditemukan.'); if(!allowedBranch(u,t.branch_id))return fail(h,403,'Akses ditolak.'); const remaining=Number(t.total)-Number(t.paid)-Number(t.paid_after); if(amount>remaining)return fail(h,400,'Pembayaran melebihi sisa kasbon.'); await db.query('INSERT INTO kasbon_payments(transaction_id,amount,user_id,note) VALUES(?,?,?,?)',[t.id,amount,u.id,r.payload?.note||'']); await log(u.id,'PAY_KASBON',`Pembayaran kasbon ${t.invoice_no} sebesar ${amount}`); return ok(h,{remaining:remaining-amount});
   }});
   server.route({method:'GET',path:'/api/kasbon/{id}/payments',handler:async(r,h)=>{

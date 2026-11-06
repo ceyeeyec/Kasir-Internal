@@ -23,14 +23,14 @@ function branchScope(user, requestedBranchId) {
 async function authenticate(username, password) {
   if (!username || !password) return null;
   const [rows] = await db.query(`
-    SELECT u.id,u.username,u.password_hash,u.full_name,u.role,u.branch_id,u.status,
+    SELECT u.id,u.username,u.password_hash,u.full_name,u.role,u.branch_id,u.photo,u.status,u.archived_at,
            b.name AS branch_name
     FROM users u
     LEFT JOIN branches b ON b.id=u.branch_id
     WHERE u.username=? LIMIT 1
   `, [username]);
   const u = rows[0];
-  if (!u || u.status !== 'aktif') return null;
+  if (!u || u.status !== 'aktif' || u.archived_at) return null;
   const valid = await bcrypt.compare(password, u.password_hash);
   if (!valid) return null;
   delete u.password_hash;
